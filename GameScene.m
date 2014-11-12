@@ -28,7 +28,9 @@
 @property (nonatomic, assign) CGSize fullsize;
 @property (nonatomic, assign) CGSize textSize;
 @property (nonatomic, assign) CGSize visiblesize;
-
+@property (nonatomic, assign) float lastOriginYPoint;
+@property (nonatomic, assign) BOOL wraparound;
+@property (nonatomic, assign) float overValue;
 @property (nonatomic, strong) SKSpriteNode *showNode;
 
 @end
@@ -44,12 +46,13 @@
         self.fontName = @"Helvetica";
         self.fontSize = 15.0f;
 
-        
+        _wraparound = NO;
         
         _scrollPnt = CGPointMake(0, 0); // scrolling point
-        _fullsize = CGSizeMake(73.0f * 3.0f + 20.0f, 1200); // full Image Size
+        _fullsize = CGSizeMake(200, 2000); // full Image Size
+        _visiblesize = CGSizeMake(200, 450); // visible Size
         //_fullsize = CGSizeMake(73.0f * 3.0f + 20.0f, 73.0f *6.0f + 20.0f); // full Image Size
-        _visiblesize = CGSizeMake(73.0f * 3.0f + 20.0f, 73.0f *2.0f + 20.0f); // visible Size
+        //_visiblesize = CGSizeMake(73.0f * 3.0f + 20.0f, 73.0f *2.0f + 20.0f); // visible Size
         NSLog(@"scale = %f", [UIScreen mainScreen].scale);
         
         // 1. Create Full image
@@ -152,16 +155,38 @@
     NSLog(@"_textSize.h = %f", _textSize.height);
     
     NSLog(@"scroll Poition = %@", NSStringFromCGPoint(_scrollPnt));
-    if (_scrollPnt.y <= 0) {
-        _scrollPnt.y -= dist;
-        return;
-    //} else if( _scrollPnt.y >= (_fullsize.height - _visiblesize.height) * 2.0f) {
-    } else if( _scrollPnt.y >= (_textSize.height - _visiblesize.height) * 2.0f) {
-        _scrollPnt.y -= dist;
-        return;
+    
+    CGSize resultsize;
+    if (_wraparound) {
+        
+        if (_scrollPnt.y > _lastOriginYPoint) {
+            _overValue = (_scrollPnt.y - _lastOriginYPoint) / 2;
+            if (_overValue >= _visiblesize.height) {
+                _scrollPnt = CGPointMake(0, 0);
+                _overValue = 0;
+                resultsize = _visiblesize;
+            }else {
+                resultsize = CGSizeMake(_visiblesize.width, _visiblesize.height - _overValue);
+            }
+        } else {
+            resultsize = _visiblesize;
+        }
+        
+    } else {
+        if (_scrollPnt.y <= 0) {
+            _scrollPnt.y -= dist;
+            return;
+            //} else if( _scrollPnt.y >= (_fullsize.height - _visiblesize.height) * 2.0f) {
+        } else if( _scrollPnt.y >= (_textSize.height - _visiblesize.height) * 2.0f) {
+            _scrollPnt.y -= dist;
+            return;
+        }
+        resultsize = _visiblesize;
     }
     
-    UIImage *image = [self getSubImage:_fullImage ByPosition:_scrollPnt AndSize:_visiblesize];
+    
+    
+    UIImage *image = [self getSubImage:_fullImage ByPosition:_scrollPnt AndSize:resultsize];
     SKTexture *texture = [SKTexture textureWithImage:image];
     _showNode.texture = texture;
 }
@@ -172,7 +197,7 @@
 {
     // 1. Begin Image Context
     //  you must use WithOptions for setting scale(the third parameter) for Retina 
-    UIGraphicsBeginImageContextWithOptions(size, YES, [UIScreen mainScreen].scale);
+    UIGraphicsBeginImageContextWithOptions(_visiblesize, YES, [UIScreen mainScreen].scale);
     
     // 2. Get Current Context
     CGContextRef context = UIGraphicsGetCurrentContext();
@@ -182,16 +207,13 @@
         return nil;
     }
     
-    // 3. Adjust Coordinate Origin
+    // 3. Adjust Coordinate Origin (this part would not be necessary if use UIKit version )
     //  UIKit origin  is Top-Left;
     //  Core-Graphics is Bottom-Left, so we need to flip
     CGAffineTransform transform = CGAffineTransformIdentity;
+    transform = CGAffineTransformTranslate(transform, 0.0f, _visiblesize.height); // move UIKit's origin to CG's origin
     transform = CGAffineTransformScale(transform, 1.0f, -1.0f);
-    transform = CGAffineTransformTranslate(transform, 0.0f, -size.height);
     CGContextConcatCTM(context, transform);
-    
-    NSLog(@"image size = %@", NSStringFromCGSize(fullImage.size));
-    NSLog(@"size = %@", NSStringFromCGSize(size));
     
     // 4. Point and Pixels convert
     //  UIKit is in  Points
@@ -199,12 +221,47 @@
     //  on Retina screen, Point = 2 Pixels
     //  now we need to convert UIImage to CGImageRef to use CG Drawing Operation
     //  so subImageRef's size need to multiply by 2 (from pixel to point)
-    CGRect subImageArea = CGRectMake(pos.x, pos.y, size.width*2, size.height*2);
     CGImageRef fullImageRef = fullImage.CGImage;
-    CGImageRef subImageRef = CGImageCreateWithImageInRect(fullImageRef, subImageArea);
     
-    CGRect subRect = CGRectMake(0, 0, size.width, size.height);
-    CGContextDrawImage(context, subRect, subImageRef);
+    if (_wraparound) {
+        NSLog(@"size.h = %f", size.height);
+        NSLog(@"overValue = %f", _overValue);
+        // part 1
+        
+        CGRect subImageArea = CGRectMake(pos.x, pos.y, size.width*2, size.height*2);
+        CGImageRef subImageRef = CGImageCreateWithImageInRect(fullImageRef, subImageArea);
+        
+        // 1. Core Graphics Version
+        CGRect subRect = CGRectMake(0, _overValue, size.width, size.height);
+        CGContextDrawImage(context, subRect, subImageRef);
+
+        // 2. UIKit Version
+        //UIImage *subUIImage = [UIImage imageWithCGImage:subImageRef];
+        //[subUIImage drawInRect:CGRectMake(0, 0, size.width, size.height)];
+
+        CGContextSaveGState(context);
+        // part 2
+        if (_overValue != 0) {
+            //CGRect subImageArea2 = CGRectMake(pos.x, 0, size.width*2, _overValue*2);
+            CGRect subImageArea2 = CGRectMake(pos.x, 0, size.width*2, _overValue*2);
+            CGImageRef subImageRef2 = CGImageCreateWithImageInRect(fullImageRef, subImageArea2);
+            
+            // 1. Core Graphics Version
+            CGRect subRect2 = CGRectMake(0, 0, size.width, _overValue);
+            CGContextDrawImage(context, subRect2, subImageRef2);
+
+            // 2. UIKit Version
+            //subUIImage = [UIImage imageWithCGImage:subImageRef2];
+            //[subUIImage drawInRect:CGRectMake(0, _visiblesize.height - _overValue, size.width, _overValue)];
+        }
+        
+    } else {
+        CGRect subImageArea = CGRectMake(pos.x, pos.y, size.width*2, size.height*2);
+        CGImageRef subImageRef = CGImageCreateWithImageInRect(fullImageRef, subImageArea);
+        CGRect subRect = CGRectMake(0, 0, size.width, size.height);
+        CGContextDrawImage(context, subRect, subImageRef);
+
+    }
     
     UIImage *subImage = UIGraphicsGetImageFromCurrentImageContext();
     
@@ -269,6 +326,9 @@
     
     textRect.size.height = ceil(textRect.size.height);
     textRect.size.width = ceil(textRect.size.width);
+    //NSLog(@"textRect.hight = %f", textRect.size.height);
+    _fullsize = textRect.size;
+    _lastOriginYPoint = (_fullsize.height - _visiblesize.height) *2; // turn point into pixel
     
     //Mac build crashes when the size is nothing - this also skips out on unecessary cycles below when the size is nothing
     if (textRect.size.width == 0 || textRect.size.height == 0) {
