@@ -1,6 +1,6 @@
 MTScrollWindow
 ==============
 
-this small project shows you how to re-texture your SKSpriteNode to make scroll background
+this small project will show you how to re-texture your SKSpriteNode to make scroll background
 
-you can use this SKSpriteNode to make scrolling item window or scrolling dialogue box 
+you can use this SKSpriteNode to make scrolling item window or scrolling dialogue box
